@@ -34,6 +34,7 @@ from release_bot.utils import process_version_from_title
 from release_bot.new_release import NewRelease
 from release_bot.new_pr import NewPR
 from release_bot.webhooks import GithubWebhooksHandler
+from release_bot.utils import parse_aur
 
 
 class ReleaseBot:
@@ -234,6 +235,36 @@ class ReleaseBot:
                 raise
         self.github.update_changelog(self.new_release.version)
         return self.new_release
+
+    def make_aur_release(self):
+        def release_handler(success):
+            result = "released" if success else "failed to release"
+            if self.conf.dry_run:
+                msg = f"I would have {result} version {self.new_release.version} on PyPI now."
+            else:
+                msg = f"I just {result} version {self.new_release.version} on PyPI"
+            level = logging.INFO if success else logging.ERROR
+            self.logger.log(level, msg)
+            self.github.comment.append(msg)
+
+        latest_aur = parse_aur()["pkgver"]
+        if Version.coerce(latest_pypi) >= Version.coerce(self.new_release.version):
+            self.logger.info(f"{self.new_release.version} has already been released on PyPi")
+            return False
+        self.git.fetch_tags()
+        self.git.checkout(self.new_release.version)
+        try:
+            # Bump version of pkgbuild, and push it onto the AUR
+            # if self.pypi.release() == False:
+            #     return False
+            # release_handler(success=True)
+        except ReleaseException:
+            release_handler(success=False)
+            raise
+        finally:
+            self.git.checkout('master')
+
+        return True
 
     def make_new_pypi_release(self):
         if not self.new_release.pypi:
